@@ -2,13 +2,13 @@
 
 ## 1. Opis zbioru danych i kontekstu
 
-Analizowany podzbior pochodzi z kolekcji danych o procesach przemyslowych (iOPT / Factory) i zawiera sygnatury zdarzen dla 6 aktywnosci:
-- Burn
-- Mill
-- Pickup-move-oven
-- Sort
-- Storage
-- Transport
+Analizowany podzbior pochodzi z kolekcji danych o procesach przemyslowych i zawiera sygnatury zdarzen dla 6 aktywnosci:
+- Burn (Spalanie, pogrzewanie)
+- Mill (Mielenie)
+- Pickup-move-oven  (Pobierz i podgrzej)
+- Sort  (Sortuj)
+- Storage   (Przechowaj)
+- Transport (Transportuj)
 
 W projekcie znajduja sie:
 - pliki sygnatur (`Signature_*.txt`) z sekwencjami eventow JSON,
