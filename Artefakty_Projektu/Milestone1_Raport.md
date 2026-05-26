@@ -135,14 +135,154 @@ Tabela pokrycia sygnałów per aktywność:
 
 **Wniosek:** Brakujące wartości wynikają z architektury systemu (każda stacja ma własny zestaw czujników), a nie z błędów pomiarowych. Dane są kompletne w zakresie sygnałów właściwych dla każdej stacji.
 
-### Wartości sygnałów – analiza
+### Pełna analiza wartości sygnałów – wszystkie aktywności / stacje
 
-Sygnały przyjmują wyłącznie wartości ze zbioru `{-512, 0, 512}` (dla silników i zaworów) lub `{0, 1}` (dla czujników binarnych). Brak wartości odstających ani anomalii numerycznych.
+Sygnały przyjmują wyłącznie wartości ze zbioru `{-512, 0, 1, 512}`. Brak wartości odstających ani anomalii numerycznych. Poniżej pełna analiza każdego sygnału dla każdej aktywności.
 
-Przykładowe wartości dla aktywności **Burn** (OV_1):
-- `m1_speed`: przyjmuje wartości `-512` (cofanie), `0` (stop), `512` (do przodu) – silnik napędu pieca
-- `o7_valve`: `0` lub `512` – zawór pneumatyczny
-- `i1_pos_switch`, `i2_pos_switch`: `0` lub `1` – przełączniki krańcowe pozycji
+#### Burn (OV_1) – 13 eventów, 6 sygnałów
+
+| Sygnał | Typ | Wartości w danych | Rozkład (ile eventów) | Interpretacja |
+|--------|-----|-------------------|----------------------|---------------|
+| `i1_pos_switch` | czujnik pozycji | 0, 1 | 0: 5 eventów, 1: 8 eventów | Przełącznik krańcowy pozycji 1 (drzwi pieca zamknięte) |
+| `i2_pos_switch` | czujnik pozycji | 0, 1 | 0: 12 eventów, 1: 1 event | Przełącznik krańcowy pozycji 2 (drzwi pieca otwarte) |
+| `i5_light_barrier` | bariera świetlna | 1 | 1: 13 eventów (stała) | Detal obecny w piecu przez cały cykl |
+| `m1_speed` | silnik | -512, 0, 512 | -512: 2 ev., 0: 9 ev., 512: 2 ev. | Silnik napędu drzwi: -512=otwieranie, 0=stop, 512=zamykanie |
+| `o7_valve` | zawór | 0, 512 | 0: 7 eventów, 512: 6 eventów | Zawór pneumatyczny podtrzymujący pozycję |
+| `o8_compressor` | sprężarka | 0 | 0: 13 eventów (stała) | Sprężarka nieaktywna w tym cyklu |
+
+#### Mill (MM_1) – 12 eventów, 9 sygnałów
+
+| Sygnał | Typ | Wartości w danych | Rozkład (ile eventów) | Interpretacja |
+|--------|-----|-------------------|----------------------|---------------|
+| `i1_pos_switch` | czujnik pozycji | 1 | 1: 12 eventów (stała) | Detal zamocowany przez cały cykl |
+| `i2_pos_switch` | czujnik pozycji | 0 | 0: 12 eventów (stała) | Pozycja 2 niewyzwolona |
+| `i3_pos_switch` | czujnik pozycji | 0 | 0: 12 eventów (stała) | Pozycja 3 niewyzwolona |
+| `i4_light_barrier` | bariera świetlna | 1 | 1: 12 eventów (stała) | Detal obecny przez cały cykl |
+| `m1_speed` | silnik | 0 | 0: 12 eventów (stała) | Silnik osi X nieaktywny |
+| `m2_speed` | silnik | 0 | 0: 12 eventów (stała) | Silnik osi Y nieaktywny |
+| `m3_speed` | silnik | 0 | 0: 12 eventów (stała) | Silnik osi Z nieaktywny |
+| `o7_valve` | zawór | 0 | 0: 12 eventów (stała) | Zawór nieaktywny |
+| `o8_compressor` | sprężarka | 0, 512 | 0: 6 eventów, 512: 6 eventów | Sprężarka: cyklicznie włączana/wyłączana (mocowanie detalu) |
+
+**Uwaga:** W Mill jedynym sygnałem zmieniającym wartość jest `o8_compressor` — cykl frezowania polega na włączeniu/wyłączeniu sprężarki (mocowanie pneumatyczne). Silniki i czujniki pozostają stałe.
+
+#### Sort (SM_1) – 12 eventów, 10 sygnałów
+
+| Sygnał | Typ | Wartości w danych | Rozkład (ile eventów) | Interpretacja |
+|--------|-----|-------------------|----------------------|---------------|
+| `i1_light_barrier` | bariera świetlna | 0, 1 | 0: 2 ev., 1: 10 ev. | Detal na wejściu taśmy (pojawia się w event 3) |
+| `i3_light_barrier` | bariera świetlna | 0, 1 | 0: 1 ev., 1: 11 ev. | Bariera środkowa (krótkie przerwanie w event 8) |
+| `i6_light_barrier` | bariera świetlna | 1 | 1: 12 eventów (stała) | Bariera pozycji 6 – stale aktywna |
+| `i7_light_barrier` | bariera świetlna | 0, 1 | 0: 1 ev., 1: 11 ev. | Bariera wyjścia (detal opuszcza w event 12) |
+| `i8_light_barrier` | bariera świetlna | 1 | 1: 12 eventów (stała) | Bariera pozycji 8 – stale aktywna |
+| `m1_speed` | silnik | -512, 0 | -512: 10 ev., 0: 2 ev. | Taśmociąg: -512=jazda (większość cyklu), 0=stop |
+| `o5_valve` | zawór | 0 | 0: 12 eventów (stała) | Zawór 5 nieaktywny |
+| `o6_valve` | zawór | 0, 512 | 0: 11 ev., 512: 1 ev. | Zawór kierujący detal (aktywny w event 11) |
+| `o7_valve` | zawór | 0 | 0: 12 eventów (stała) | Zawór 7 nieaktywny |
+| `o8_compressor` | sprężarka | 0, 512 | 0: 11 ev., 512: 1 ev. | Sprężarka (aktywna razem z o6_valve w event 11) |
+
+#### Pickup-move-oven (VGR_1) – 18 eventów, 10 sygnałów
+
+| Sygnał | Typ | Wartości w danych | Rozkład (ile eventów) | Interpretacja |
+|--------|-----|-------------------|----------------------|---------------|
+| `i1_pos_switch` | czujnik pozycji | 0 | 0: 18 eventów (stała) | Pozycja 1 niewyzwolona |
+| `i2_pos_switch` | czujnik pozycji | 0, 1 | 0: 8 ev., 1: 10 ev. | Czujnik pozycji ramienia (góra/dół) |
+| `i3_pos_switch` | czujnik pozycji | 0, 1 | 0: 14 ev., 1: 4 ev. | Czujnik pozycji obrotu |
+| `i4_light_barrier` | bariera świetlna | 1 | 1: 18 eventów (stała) | Detal obecny przez cały cykl |
+| `i7_light_barrier` | bariera świetlna | 1 | 1: 18 eventów (stała) | Bariera bezpieczeństwa aktywna |
+| `m1_speed` | silnik | 0, 512 | 0: 15 ev., 512: 3 ev. | Silnik obrotu (aktywny w 3 eventach) |
+| `m2_speed` | silnik | -512, 0, 512 | -512: 4 ev., 0: 10 ev., 512: 4 ev. | Silnik podnoszenia: -512=w dół, 512=w górę |
+| `m3_speed` | silnik | -512, 0, 512 | -512: 5 ev., 0: 8 ev., 512: 5 ev. | Silnik wysięgnika: -512=cofanie, 512=wysuwanie |
+| `o7_compressor` | sprężarka | 0, 512 | 0: 5 ev., 512: 13 ev. | Sprężarka chwytaka (aktywna przez większość cyklu) |
+| `o8_valve` | zawór | 512 | 512: 18 eventów (stała) | Zawór chwytaka próżniowego – stale otwarty |
+
+**Uwaga:** W Pickup-move-oven aż 3 silniki zmieniają wartość (m1, m2, m3) — robot wykonuje złożony ruch wieloosiowy. Zawór `o8_valve` jest stale otwarty (podciśnienie chwytaka utrzymywane przez cały cykl).
+
+#### Storage (HBW_1) – 47 eventów, 12 sygnałów
+
+| Sygnał | Typ | Wartości w danych | Rozkład (ile eventów) | Interpretacja |
+|--------|-----|-------------------|----------------------|---------------|
+| `i1_light_barrier` | bariera świetlna | 0, 1 | 0: 10 ev., 1: 37 ev. | Bariera wejścia magazynu |
+| `i2_light_barrier` | bariera świetlna | 0 | 0: 47 eventów (stała) | Bariera pozycji 2 – nieaktywna |
+| `i3_light_barrier` | bariera świetlna | 0 | 0: 47 eventów (stała) | Bariera pozycji 3 – nieaktywna |
+| `i4_light_barrier` | bariera świetlna | 0, 1 | 0: 8 ev., 1: 39 ev. | Bariera pozycji 4 (detal w chwytaku) |
+| `i5_pos_switch` | czujnik pozycji | 0, 1 | 0: 29 ev., 1: 18 ev. | Czujnik pozycji osi X (skrajne położenie) |
+| `i6_pos_switch` | czujnik pozycji | 0, 1 | 0: 22 ev., 1: 25 ev. | Czujnik pozycji osi Y (skrajne położenie) |
+| `i7_pos_switch` | czujnik pozycji | 0, 1 | 0: 41 ev., 1: 6 ev. | Czujnik pozycji osi Z (dolne położenie) |
+| `i8_pos_switch` | czujnik pozycji | 0, 1 | 0: 22 ev., 1: 25 ev. | Czujnik pozycji osi Z (górne położenie) |
+| `m1_speed` | silnik | -512, 0 | -512: 2 ev., 0: 45 ev. | Silnik taśmy wejściowej (krótka aktywacja) |
+| `m2_speed` | silnik | -512, 0, 512 | -512: 16 ev., 0: 15 ev., 512: 16 ev. | Silnik osi X: -512=lewo, 512=prawo |
+| `m3_speed` | silnik | -512, 0, 512 | -512: 10 ev., 0: 23 ev., 512: 14 ev. | Silnik osi Y: -512=w dół, 512=w górę |
+| `m4_speed` | silnik | -512, 0, 512 | -512: 7 ev., 0: 33 ev., 512: 7 ev. | Silnik osi Z (mechanizm wyciągania) |
+
+**Uwaga:** Storage ma najbardziej złożony profil sygnałowy — 4 silniki aktywne w różnych fazach, 4 czujniki pozycji monitorujące 3 osie. Silnik `m2_speed` jest najaktywniejszy (32 z 47 eventów z wartością ≠ 0).
+
+#### Transport (WT_1) – 17 eventów, 6 sygnałów
+
+| Sygnał | Typ | Wartości w danych | Rozkład (ile eventów) | Interpretacja |
+|--------|-----|-------------------|----------------------|---------------|
+| `i3_pos_switch` | czujnik pozycji | 0, 1 | 0: 14 ev., 1: 3 ev. | Czujnik pozycji docelowej (wyzwolony po dojechaniu) |
+| `i4_pos_switch` | czujnik pozycji | 0 | 0: 17 eventów (stała) | Czujnik pozycji startowej – niewyzwolony |
+| `m2_speed` | silnik | -512, 0, 512 | -512: 6 ev., 0: 3 ev., 512: 8 ev. | Silnik jazdy: -512=do przodu, 512=powrót |
+| `o5_valve` | zawór | 0, 512 | 0: 8 ev., 512: 9 ev. | Zawór blokady/hamulca (aktywny podczas jazdy powrotnej) |
+| `o6_valve` | zawór | 0, 512 | 0: 16 ev., 512: 1 ev. | Zawór pomocniczy (krótka aktywacja) |
+| `o8_compressor` | sprężarka | 0 | 0: 17 eventów (stała) | Sprężarka nieaktywna |
+
+**Uwaga:** W Transport silnik `m2_speed` jest aktywny przez 14 z 17 eventów (82%) — wózek jedzie prawie cały czas. Faza jazdy do przodu (-512) trwa 6 eventów, faza powrotu (512) trwa 8 eventów.
+
+---
+
+### Rejestracja danych z czujników na wspólnej osi czasu
+
+Poniżej analiza jak dane ze wszystkich 6 stacji/aktywności rozkładają się na wspólnej osi czasu. **Uwaga! Poniższy wykres jest poglądowy, następnie przedstawione zostają bardziej szczegółowe wykresy z podziałem na stację:**
+
+![Wszystkie sygnały na wspólnej osi czasu](m1_all_signals_common_timeline.png)
+
+Powyższy wykres, choć gęsty, pokazuje kluczową cechę danych: **żaden sygnał (czujnik/aktuator) nie występuje jednocześnie w dwóch stacjach**. Każda stacja posiada wyłącznie swój własny zestaw komponentów. Gdy dana stacja pracuje (rejestruje dane), wszystkie komponenty pozostałych stacji są nieaktywne — nie ma żadnego nakładania się ani współdzielenia sygnałów między stacjami. Stacje działają sekwencyjnie i niezależnie od siebie.
+
+Poniżej ten sam zbiór danych podzielony na 6 osobnych wykresów — po jednym na każdą stację, z naniesionymi tylko tymi sygnałami, które faktycznie występują w danej stacji (wartości znormalizowane: 0 -> 0|1 -> 1 dla czujników, -512 -> -1|0 -> 0|512 -> 1 dla silników i zaworów). Na osi X zachowano czas trwania danej aktywności (sekundy od startu):
+
+#### Burn (OV_1)
+![Burn](m1_signals_burn.png)
+
+#### Mill (MM_1)
+![Mill](m1_signals_mill.png)
+
+#### Pickup-move-oven (VGR_1)
+![Pickup-move-oven](m1_signals_pickup_move_oven.png)
+
+#### Sort (SM_1)
+![Sort](m1_signals_sort.png)
+
+#### Storage (HBW_1)
+![Storage](m1_signals_storage.png)
+
+#### Transport (WT_1)
+![Transport](m1_signals_transport.png)
+
+
+**Kluczowe obserwacje dotyczące rejestracji na wspólnej osi czasu:**
+
+1. **Brak nakładania się** — żadne dwie aktywności nie mają wspólnego przedziału czasowego. Każda stacja rejestruje dane w odrębnym oknie czasowym.
+
+2. **Różna liczba odczytów przy zbliżonym próbkowaniu** — wszystkie stacje próbkują co ~2 sekundy, ale mają różną liczbę odczytów (od 12 do 47), co wynika z różnego czasu trwania operacji:
+
+| Aktywność | Odczytów | Czas [s] | Gęstość [odczyt/s] | Odstęp między odczytami |
+|-----------|----------|----------|-------------------|------------------------|
+| Burn | 13 | 25 | 0.52 | ~2.08 s (min 2s, max 3s) |
+| Mill | 12 | 23 | 0.52 | ~2.09 s (min 2s, max 3s) |
+| Sort | 12 | 23 | 0.52 | ~2.09 s (min 2s, max 3s) |
+| Pickup-move-oven | 18 | 34 | 0.53 | 2.00 s (stałe) |
+| Storage | 47 | 93 | 0.51 | ~2.02 s (min 2s, max 3s) |
+| Transport | 17 | 32 | 0.53 | 2.00 s (stałe) |
+
+3. **Gęstość próbkowania jest identyczna** (~0.52 odczytu/s) dla wszystkich stacji — różnice w liczbie eventów wynikają wyłącznie z różnego czasu trwania operacji, nie z różnej częstotliwości próbkowania.
+
+4. **Przerwy między aktywnościami** — między kolejnymi aktywnościami występują przerwy od ~40 sekund (Burn→Sort) do ~22 minut (Mill→Transport). W tych przerwach nie ma żadnych zarejestrowanych danych — system nie próbkuje w stanie bezczynności.
+
+5. **Łączny czas rejestracji vs czas obserwacji** — dane obejmują łącznie ~230 sekund rejestracji (suma czasów trwania) w oknie obserwacji ~57 minut (10:11–11:08). Oznacza to, że system rejestruje dane tylko przez ~6.7% czasu obserwacji — reszta to przerwy między operacjami.
+
+6. **Każda stacja rejestruje niezależnie** — nie ma wspólnych sygnałów między stacjami. Sygnały jednej stacji (np. `m1_speed` w OV_1) nie mają żadnego związku z sygnałem o tej samej nazwie w innej stacji (np. `m1_speed` w MM_1), mimo identycznej nazwy — to fizycznie różne silniki.
 
 ---
 

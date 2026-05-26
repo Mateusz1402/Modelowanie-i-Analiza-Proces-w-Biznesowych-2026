@@ -1,289 +1,238 @@
 # Milestone 2 – Eksploracja danych i analiza cech
 
-## 1. Przygotowanie logu zdarzeń
+## 0. Założenia
 
-### 1.1 Źródło danych
+**Aktywności (Burn, Mill, Pickup-move-oven, Sort, Storage, Transport) traktujemy jako Ground Truth** — znane etykiety referencyjne, względem których oceniamy jakość klasteryzacji sygnałów z czujników.
 
-Dane pochodzą z laboratoryjnego środowiska produkcyjnego Fischertechnik (Zenodo: https://zenodo.org/records/8087219). Zbiór zawiera 119 eventów z 6 aktywności zarejestrowanych 2023-03-20.
-
-### 1.2 Strategia obsługi brakujących wartości (NaN)
-
-W połączonej tabeli 26 z 26 kolumn sygnałów zawiera NaN — jest to **strukturalne** (każda stacja raportuje tylko swoje czujniki). Zastosowane strategie:
-
-| Analiza | Strategia NaN | Uzasadnienie |
-|---------|--------------|--------------|
-| PCA, klasteryzacja, korelacje | NaN → 0 | Sygnał nieaktywny = 0 (semantycznie poprawne) |
-| Isolation Forest | NaN → 0 + StandardScaler | Wymagana kompletna macierz |
-| LOF, korelacje per aktywność | Tylko sygnały aktywne (bez NaN) | Unikamy artefaktów |
-| Przebiegi czasowe | Tylko sygnały aktywne | Czytelność wizualizacji |
-
-### 1.3 Normalizacja
-
-- **Min-Max [0,1]**: dla PCA, t-SNE, klasteryzacji — zachowuje proporcje wartości
-- **StandardScaler (z-score)**: dla Isolation Forest — wymagany przez algorytm
+Cel Milestone 2: zbadać, czy na podstawie samych sygnałów sensorycznych (bez znajomości etykiet) można odtworzyć podział na aktywności — i która metoda klasteryzacji robi to najlepiej.
 
 ---
 
-## 2. Wykrywanie wartości odstających (outlierów)
+## 1. Analiza sygnałów – NaN i outliery
 
-### 2.1 Odstępy czasowe między eventami
+### 1.1 Brakujące wartości (NaN) w sygnałach
 
-Próbkowanie nominalne: ~2 sekundy. Wyniki analizy:
+Zbiór zawiera 119 eventów × 26 kolumn sygnałów. Każda stacja raportuje tylko swoje czujniki — pozostałe kolumny to NaN (strukturalne, nie błąd).
 
-| Aktywność | Eventy | Śr. odstęp [s] | Min [s] | Max [s] | Outliery (>3s lub <1s) |
-|-----------|--------|---------------|---------|---------|------------------------|
-| Burn | 13 | 2.08 | 2.0 | 3.0 | 1 (event 10–11: 3s) |
-| Mill | 12 | 2.09 | 2.0 | 3.0 | 1 (event 9–10: 3s) |
-| Pickup-move-oven | 18 | 2.0 | 2.0 | 2.0 | 0 |
-| Sort | 12 | 2.09 | 2.0 | 3.0 | 1 (event 4–5: 3s) |
-| Storage | 47 | 2.02 | 2.0 | 3.0 | 1 (event 8–9: 3s) |
-| Transport | 17 | 2.0 | 2.0 | 2.0 | 0 |
+**Strategie uzupełnienia NaN rozważone:**
 
-**Interpretacja:** Odstępy 3 s (zamiast 2 s) to artefakty rejestracji PLC (zaokrąglenie timestampów), nie błędy procesu. Pickup-move-oven i Transport mają idealnie regularne próbkowanie.
+| Strategia | Opis | Uzasadnienie |
+|-----------|------|--------------|
+| **NaN → 0** (wybrana) | Sygnał nieaktywny = 0 | Semantycznie poprawne: jeśli stacja nie raportuje sygnału, to ten komponent nie pracuje (wartość 0) |
+| NaN → mediana kolumny | Uzupełnienie medianą | Nieodpowiednie: mediana sygnału binarnego (0/1) nie ma sensu fizycznego |
+| Usunięcie kolumn z NaN | Zostawienie tylko wspólnych | Niemożliwe: żadna kolumna nie jest wspólna dla wszystkich stacji |
+| Analiza per-stacja | Osobna klasteryzacja per stacja | Traci globalny kontekst; każda stacja ma tylko 1 aktywność |
 
-### 2.2 Isolation Forest (globalne anomalie sygnałowe)
+**Wybór: NaN → 0** — jedyna strategia zachowująca pełną macierz 119×26 i mająca sens fizyczny.
 
-Parametr contamination=5% → wykryto ~6 anomalii globalnych. Anomalie koncentrują się w:
-- Eventach **granicznych** (pierwszy/ostatni event aktywności) — unikalny profil sygnałowy
-- Eventach ze **zmianą stanu** (przejście między fazami aktywności)
+### 1.2 Outliery w sygnałach
 
-Żadna z wykrytych anomalii nie wskazuje na błąd danych — są to eventy charakterystyczne dla granic aktywności.
+**Wartości sygnałów:** Po normalizacji (512→1, -512→-1) wszystkie sygnały przyjmują wartości ze zbioru `{-1, 0, 1}`. Brak wartości odstających w sensie numerycznym — dane są dyskretne i ograniczone.
 
----
+**Outliery czasowe:** Próbkowanie ~2s, pojedyncze odstępy 3s (4 z 113 = 3.5%) — artefakty rejestracji PLC, nie błędy procesu.
 
-## 3. Redukcja wymiarowości
-
-### 3.1 PCA
-
-| Komponent | Wariancja | Kumulatywna |
-|-----------|-----------|-------------|
-| PC1 | ~45% | ~45% |
-| PC2 | ~20% | ~65% |
-| PC3 | ~12% | ~77% |
-| PC4 | ~8% | ~85% |
-| PC5 | ~5% | ~90% |
-
-- **2 komponenty** wyjaśniają ~65% wariancji
-- **4 komponenty** wyjaśniają ~85% wariancji (próg 80%)
-- **6 komponentów** wyjaśniają ~95% wariancji
-
-**Najważniejsze sygnały dla PC1** (największe ładunki): sygnały specyficzne dla Storage (HBW_1) — `m2_speed`, `m3_speed`, `i5_pos_switch`, `i6_pos_switch`, `i7_pos_switch`, `i8_pos_switch`. Storage dominuje PC1 ze względu na największą liczbę eventów (47) i unikalny zestaw 12 sygnałów.
-
-**Najważniejsze sygnały dla PC2**: sygnały specyficzne dla Sort (SM_1) i Pickup-move-oven (VGR_1) — `o5_valve`, `o6_valve`, `i1_light_barrier`, `i3_light_barrier`.
-
-**Wynik PCA 2D:** Aktywności tworzą wyraźnie odrębne skupiska w przestrzeni PC1–PC2. Storage jest najbardziej oddalona od pozostałych (lewy kraniec osi PC1). Burn, Mill i Sort tworzą bliskie skupiska (podobne profile sygnałowe — małe aktywności z prostymi sekwencjami).
-
-### 3.2 t-SNE (perplexity=15, n_iter=2000)
-
-t-SNE potwierdza separowalność aktywności. Obserwacje:
-- **Storage** i **Pickup-move-oven** tworzą najbardziej zwarte, izolowane skupiska
-- **Burn**, **Mill**, **Sort** są bliżej siebie (podobne profile sygnałowe)
-- **Transport** tworzy wyraźne skupisko z powtarzającymi się stanami (faza jazdy)
+**Isolation Forest (contamination=5%):** ~6 eventów oznaczonych jako anomalie — to eventy graniczne (start/koniec aktywności) z unikalnym profilem. Nie usuwamy ich, bo są semantycznie ważne.
 
 ---
 
-## 4. Klasteryzacja
+## 2. Normalizacja sygnałów
 
-### 4.1 K-Means
+Zastosowana normalizacja:
 
-Metoda łokcia i silhouette score wskazują na optymalne k:
+1. **Skalowanie wartości PLC:** `512 → 1`, `-512 → -1` (wszystkie sygnały na skali `{-1, 0, 1}`)
+2. **Uzupełnienie NaN → 0**
+3. **Dla klasteryzacji:** dodatkowa normalizacja Min-Max [0,1] lub StandardScaler w zależności od algorytmu
 
-| k | Silhouette score | Interpretacja |
-|---|-----------------|---------------|
-| 2 | ~0.45 | Podział Storage vs reszta |
-| 3 | ~0.52 | Storage + Pickup vs reszta |
-| **6** | **~0.68** | Odpowiada liczbie aktywności |
-| 7–9 | <0.65 | Nadmierne dzielenie skupisk |
-
-**K-Means k=6:**
-- **Adjusted Rand Index (ARI) ≈ 0.75–0.85** — klastry dobrze odpowiadają rzeczywistym aktywnościom
-- Każda aktywność trafia głównie do jednego klastra
-- Niewielkie nakładanie się Burn/Mill/Sort (podobne profile sygnałowe)
-
-### 4.2 Klasteryzacja hierarchiczna (Ward linkage)
-
-Dendrogram ujawnia hierarchię podobieństwa:
-
-```
-Storage ─────────────────────────────────────────┐
-                                                  ├── Wszystkie
-Pickup-move-oven ──────────────────────────┐      │
-                                           ├──────┘
-Transport ─────────────────────────┐       │
-                                   ├───────┘
-Sort ──────────────────────┐       │
-                           ├───────┘
-Burn ──────────┐           │
-               ├───────────┘
-Mill ──────────┘
-```
-
-**Macierz odległości euklidesowych między aktywnościami:**
-
-| | Burn | Mill | Sort | Pickup | Storage | Transport |
-|---|---|---|---|---|---|---|
-| Burn | 0 | ~50 | ~80 | ~120 | ~280 | ~90 |
-| Mill | ~50 | 0 | ~75 | ~115 | ~275 | ~85 |
-| Sort | ~80 | ~75 | 0 | ~100 | ~260 | ~70 |
-| Pickup | ~120 | ~115 | ~100 | 0 | ~220 | ~110 |
-| Storage | ~280 | ~275 | ~260 | ~220 | 0 | ~250 |
-| Transport | ~90 | ~85 | ~70 | ~110 | ~250 | 0 |
-
-**Wnioski:**
-- Burn i Mill są najbardziej podobne (obie używają silnika m1 i zaworów, podobna liczba eventów)
-- Storage jest najbardziej odległa od wszystkich (12 unikalnych sygnałów, 47 eventów, ruch 3D)
-- Sort i Transport są bliskie (podobne sygnały: m1_speed, zawory)
+Po normalizacji macierz cech: **119 wierszy × 26 kolumn**, wartości `{0, 0.5, 1}` (po Min-Max) lub z-score (po StandardScaler).
 
 ---
 
-## 5. Analiza relacji między zdarzeniami
+## 3. Redukcja wymiarowości (PCA)
 
-### 5.1 Korelacje globalne (Spearman, NaN→0)
+PCA zastosowane opcjonalnie przed klasteryzacją — sprawdzamy wpływ redukcji na jakość klastrów.
 
-Brak silnych korelacji globalnych (|r| > 0.5) między sygnałami różnych stacji — co jest oczekiwane, ponieważ każda stacja działa niezależnie. Sygnały różnych stacji nie są ze sobą powiązane w połączonej tabeli.
+| Wariant | Wymiary | Wariancja wyjaśniona | Użycie |
+|---------|---------|---------------------|--------|
+| Bez PCA | 26 | 100% | Baseline |
+| PCA 5 komponentów | 5 | ~72.5% | Główny wariant |
+| PCA 2 komponenty | 2 | ~41.1% | Wizualizacja |
 
-### 5.2 Korelacje wewnątrz aktywności
-
-Silne korelacje wewnątrz aktywności (sygnały tej samej stacji):
-
-| Aktywność | Para sygnałów | Korelacja | Interpretacja |
-|-----------|--------------|-----------|---------------|
-| Burn | `m1_speed` ↔ `o7_valve` | ~0.7 | Silnik i zawór działają razem |
-| Sort | `m1_speed` ↔ `o6_valve` | ~-0.8 | Taśma zatrzymuje się gdy zawór otwiera |
-| Sort | `o6_valve` ↔ `o8_compressor` | ~0.95 | Zawór i sprężarka zawsze razem |
-| Storage | `m2_speed` ↔ `i5_pos_switch` | ~-0.7 | Silnik zatrzymuje się gdy czujnik wyzwolony |
-| Transport | `m2_speed` ↔ `o5_valve` | ~0.85 | Jazda i zawór blokady razem |
-
-### 5.3 Graf następstw zdarzeń (DFG)
-
-Liczba przejść ze zmianą sygnału per aktywność:
-
-| Aktywność | Eventy | Przejścia ze zmianą | % eventów ze zmianą |
-|-----------|--------|--------------------|--------------------|
-| Burn | 13 | 6 | 46% |
-| Mill | 12 | 3 | 25% |
-| Sort | 12 | 6 | 50% |
-| Pickup-move-oven | 18 | 12 | 67% |
-| Storage | 47 | 28 | 60% |
-| Transport | 17 | 4 | 24% |
-
-**Obserwacja:** Pickup-move-oven ma najwyższy % przejść (67%) — robot wykonuje ciągłe ruchy wieloosiowe. Transport i Mill mają najniższy % (24–25%) — długie fazy stabilnego stanu (jazda, frezowanie).
+Aktywności tworzą wyraźnie odrębne skupiska w przestrzeni PCA 2D — co sugeruje, że klasteryzacja powinna dobrze odtworzyć podział na aktywności.
 
 ---
 
-## 6. Wzorce czasowe
+## 4. Klasteryzacja sygnałów z sensorów
 
-### 6.1 Rytm próbkowania
+### 4.1 Algorytmy i parametry
 
-Próbkowanie regularne ~2 s dla wszystkich aktywności. Pickup-move-oven i Transport: idealne 2 s bez wyjątków. Pozostałe: pojedyncze odstępy 3 s (artefakty rejestracji).
+Testujemy 3 algorytmy klasteryzacji z różnymi parametrami:
 
-### 6.2 Czas trwania vs złożoność
+#### K-Means
 
-| Aktywność | Czas [s] | Eventy | Eventy/s | Przejść/event |
-|-----------|----------|--------|----------|---------------|
-| Storage | 93 | 47 | 0.51 | 0.60 |
-| Pickup-move-oven | 34 | 18 | 0.53 | 0.67 |
-| Transport | 32 | 17 | 0.53 | 0.24 |
-| Burn | 25 | 13 | 0.52 | 0.46 |
-| Sort | 23 | 12 | 0.52 | 0.50 |
-| Mill | 23 | 12 | 0.52 | 0.25 |
+| Parametr | Testowane wartości |
+|----------|-------------------|
+| k (liczba klastrów) | 2, 3, 4, 5, **6**, 7, 8, 9 |
+| Dane wejściowe | Raw (26D), PCA-5, PCA-2 |
+| Metryka doboru k | Silhouette score, Elbow (inercja) |
 
-Gęstość eventów (~0.52 event/s) jest stała dla wszystkich aktywności — wynika z regularnego próbkowania 2 s. Różnice w czasie trwania odzwierciedlają złożoność mechaniczną operacji.
+#### DBSCAN
 
----
+| Parametr | Testowane wartości |
+|----------|-------------------|
+| eps | 0.3, 0.5, 0.7, 1.0, 1.5, 2.0 |
+| min_samples | 2, 3, 5 |
+| Dane wejściowe | PCA-5 (StandardScaler) |
+| Metryka | Silhouette, liczba klastrów, % szumu |
 
-## 7. Analiza sekwencji i wariantów
+#### HDBSCAN
 
-### 7.1 Stany sygnałowe
+| Parametr | Testowane wartości |
+|----------|-------------------|
+| min_cluster_size | 3, 5, 7, 10, 15 |
+| min_samples | 2, 3, 5 |
+| Dane wejściowe | PCA-5 (StandardScaler) |
+| Metryka | Silhouette, liczba klastrów, % szumu |
 
-Każdy event = unikalny stan (kombinacja wartości sygnałów aktywnej stacji).
-Warto zaznaczyć, że ze względu na mały zbiór danych (oraz krótki przedział czasu, który jest reprezentowny przez dane) obserwacja ciekawych wzorców czasowych staje się trudna.
+### 4.2 Metryki oceny
 
-| Aktywność | Eventy | Unikalne stany | Powtórzone stany | % unikalnych |
-|-----------|--------|---------------|-----------------|--------------|
-| Burn | 13 | 9 | 4 | 69% |
-| Mill | 12 | 4 | 8 | 33% |
-| Sort | 12 | 9 | 3 | 75% |
-| Pickup-move-oven | 18 | 14 | 4 | 78% |
-| Storage | 47 | 35 | 12 | 74% |
-| Transport | 17 | 5 | 12 | 29% |
-
-**Obserwacje:**
-- **Mill** (33%) i **Transport** (29%) mają dużo powtórzonych stanów — długie fazy stabilne (frezowanie, jazda)
-- **Pickup-move-oven** (78%) i **Sort** (75%) mają prawie unikalne stany — ciągłe zmiany sygnałów
-- **Storage** ma 35 unikalnych stanów z 47 eventów — złożoność ruchu 3D
-
-### 7.2 Weryfikacja wzorców CEP (Siddhi)
-
-Wszystkie wzorce zdefiniowane w plikach `.siddhi` są wykrywalne w danych:
-
-| Aktywność | Wzorców | Wykrytych | Wynik |
-|-----------|---------|-----------|-------|
-| Burn | 6 | 6 | ✓ 100% |
-| Mill | 3 | 3 | ✓ 100% |
-| Sort | 6 | 6 | ✓ 100% |
-
-Wzorce CEP opisują kluczowe przejścia stanów (np. Burn P1: `m1_speed: 0→-512` i `o7_valve: 0→512` — otwarcie pieca). Wszystkie są obecne w danych, co potwierdza poprawność sygnatur.
+Każdą konfigurację oceniamy metrykami:
+- **Adjusted Rand Index (ARI)** — zgodność z Ground Truth (aktywności), zakres [-1, 1], 1 = idealne dopasowanie
+- **Normalized Mutual Information (NMI)** — informacja wzajemna z GT, zakres [0, 1]
+- **Silhouette score** — jakość wewnętrzna klastrów (bez GT), zakres [-1, 1]
+- **Liczba klastrów** — ile klastrów znalazł algorytm
+- **% szumu** — ile eventów nie przypisano do żadnego klastra (DBSCAN/HDBSCAN)
 
 ---
 
-## 8. Wykrywanie anomalii
+## 5. Porównanie klastrów z aktywnościami (Ground Truth)
 
-### 8.1 Isolation Forest (globalne)
+### 5.1 Wyniki K-Means
 
-- Wykryto ~6 anomalii (5% contamination)
-- Anomalie to eventy graniczne (start/koniec aktywności) z unikalnym profilem
-- Brak anomalii wskazujących na błąd procesu lub awarie sprzętu
+Top wyniki grid search (sortowane po ARI):
 
-### 8.2 Local Outlier Factor (LOF, per aktywność)
+| Dane | k | ARI | NMI | Silhouette |
+|------|---|-----|-----|-----------|
+| **Raw_26D** | **4** | **0.790** | **0.867** | 0.356 |
+| PCA_5 | 4 | 0.790 | 0.867 | 0.545 |
+| PCA_2 | 4 | 0.753 | 0.823 | 0.619 |
+| Raw_26D | 7 | 0.749 | 0.924 | 0.428 |
+| Raw_26D | 6 | 0.665 | 0.869 | 0.397 |
+| PCA_5 | 6 | 0.665 | 0.869 | 0.663 |
 
-LOF analizuje każdą aktywność osobno (n_neighbors=5):
+**Obserwacja:** K-Means z k=4 daje wyższy ARI niż k=6 — algorytm łączy podobne aktywności w jeden klaster (Burn+Transport korzystają z podobnych typów sygnałów: silnik m1/m2 + zawory pneumatyczne).
 
-| Aktywność | Eventy | Anomalie LOF | Interpretacja |
-|-----------|--------|-------------|---------------|
-| Burn | 13 | 1–2 | Eventy ze zmianą stanu (przejścia faz) |
-| Mill | 12 | 0–1 | Brak lub 1 event graniczny |
-| Sort | 12 | 1–2 | Eventy ze zmianą stanu |
-| Pickup-move-oven | 18 | 1–2 | Eventy ze zmianą kierunku ruchu |
-| Storage | 47 | 2–3 | Eventy ze zmianą osi ruchu |
-| Transport | 17 | 1 | Event ze zmianą kierunku jazdy |
+### 5.2 Wyniki DBSCAN
 
-**Wniosek:** Anomalie LOF odpowiadają eventom ze zmianą stanu — są to **semantycznie ważne** eventy (kluczowe przejścia w procesie), nie błędy. Brak anomalii wskazujących na awarie lub nieprawidłowe działanie systemu.
+Top wyniki grid search (dane: PCA-5):
+
+| eps | min_samples | Klastry | Szum [%] | ARI | NMI | Silhouette |
+|-----|-------------|---------|----------|-----|-----|-----------|
+| **1.0** | **2** | **5** | **0.0** | **0.914** | **0.944** | **0.611** |
+| 1.0 | 3 | 5 | 0.0 | 0.914 | 0.944 | 0.611 |
+| 1.0 | 5 | 5 | 0.0 | 0.914 | 0.944 | 0.611 |
+| 0.7 | 2 | 6 | 0.0 | 0.793 | 0.896 | 0.595 |
+| 0.3 | 5 | 11 | 16.0 | 0.641 | 0.848 | 0.848 |
+
+**Obserwacja:** DBSCAN z eps=1.0 jest stabilny (3 wartości min_samples dają identyczny wynik) — klastry są dobrze zdefiniowane. Brak szumu (0%).
+
+### 5.3 Wyniki HDBSCAN
+
+Top wyniki grid search (dane: PCA-5):
+
+| min_cluster_size | min_samples | Klastry | Szum [%] | ARI | NMI | Silhouette |
+|-----------------|-------------|---------|----------|-----|-----|-----------|
+| **10** | **5** | **5** | **0.0** | **0.914** | **0.944** | **0.611** |
+| 15 | 5 | 3 | 20.2 | 0.891 | 0.905 | 0.585 |
+| 15 | 2 | 3 | 20.2 | 0.891 | 0.905 | 0.585 |
+| 10 | 2 | 6 | 6.7 | 0.715 | 0.882 | 0.649 |
+
+**Obserwacja:** HDBSCAN z mcs=10, ms=5 daje identyczny wynik jak DBSCAN — 5 klastrów bez szumu.
+
+### 5.4 Macierze konfuzji – klastry vs Ground Truth
+
+**DBSCAN (eps=1.0, min_samples=2) — najlepszy wynik:**
+
+| Aktywność | K0 | K1 | K2 | K3 | K4 |
+|-----------|----|----|----|----|----|
+| Burn | **13** | 0 | 0 | 0 | 0 |
+| Mill | 0 | **12** | 0 | 0 | 0 |
+| Pickup-move-oven | 0 | 0 | **18** | 0 | 0 |
+| Sort | 0 | 0 | 0 | **12** | 0 |
+| Storage | 0 | 0 | 0 | 0 | **47** |
+| Transport | **17** | 0 | 0 | 0 | 0 |
+
+**Mapowanie klaster → aktywność:**
+- **K0** (n=30): Burn (13) + Transport (17) — **dwie aktywności w jednym klastrze!** Profile sygnałowe Burn (OV_1) i Transport (WT_1) są na tyle podobne (oba używają silnika i zaworów pneumatycznych w zbliżonych proporcjach), że DBSCAN je łączy.
+- **K1** (n=12): wyłącznie Mill
+- **K2** (n=18): wyłącznie Pickup-move-oven
+- **K3** (n=12): wyłącznie Sort
+- **K4** (n=47): wyłącznie Storage
+
+**Wniosek:** 4 z 6 aktywności mają własne, czyste klastry (Mill, Pickup, Sort, Storage). Burn i Transport są nieodróżnialne na poziomie sygnałów — to ograniczenie danych, nie algorytmu.
+
+### 5.4 Porównanie zbiorcze
+
+| Algorytm | Najlepsze parametry | ARI | NMI | Silhouette | Klastry | Szum [%] |
+|----------|--------------------|----|-----|-----------|---------|----------|
+| K-Means | k=4, dane=Raw_26D (MinMax) | **0.790** | 0.867 | 0.356 | 4 | 0% |
+| DBSCAN | eps=1.0, min_samples=2, dane=PCA-5 | **0.914** | 0.944 | 0.611 | 5 | — |
+| HDBSCAN | min_cluster_size=10, min_samples=5, dane=PCA-5 | **0.914** | 0.944 | 0.611 | 5 | — |
+
+**Najlepsza metoda: DBSCAN** (eps=1.0, min_samples=2) i HDBSCAN (mcs=10, ms=5) osiągają identyczny wynik ARI=0.914, NMI=0.944 — znacząco lepszy niż K-Means (ARI=0.790).
+
+Uwaga: K-Means najlepiej działa z k=4 (nie k=6) — łączy podobne aktywności (Burn+Mill, Sort+Transport) w jeden klaster, co odzwierciedla rzeczywiste podobieństwo profili sygnałowych.
 
 ---
 
-## 9. Podsumowanie Milestone 2
+## 6. Wybór najlepszej metody klasteryzacji
 
-### Kluczowe wyniki
+Na podstawie porównania w sekcji 5 wybieramy najlepszą kombinację:
+- **Algorytm:** DBSCAN (lub HDBSCAN — identyczny wynik)
+- **Parametry:** eps=1.0, min_samples=2 (DBSCAN) / min_cluster_size=10, min_samples=5 (HDBSCAN)
+- **Przygotowanie danych:** NaN→0, normalizacja 512→1, MinMax [0,1], PCA 5 komponentów
+- **ARI vs Ground Truth:** 0.914
+- **NMI vs Ground Truth:** 0.944
 
-| Analiza | Wynik |
-|---------|-------|
-| Outliery czasowe | ~4 odstępy 3s (artefakty rejestracji, nie błędy) |
-| Anomalie Isolation Forest | ~6 eventów granicznych (5% contamination) |
-| PCA — komponenty do 80% wariancji | 4 komponenty |
-| PCA — separowalność aktywności | Wyraźna w przestrzeni PC1–PC2 |
-| t-SNE — separowalność | Potwierdzona, 6 odrębnych skupisk |
-| K-Means k=6 — ARI | ~0.75–0.85 (dobre dopasowanie do aktywności) |
-| Najlepsze k (silhouette) | 6 (odpowiada liczbie aktywności) |
-| Wzorce CEP | 15/15 wykrytych (Burn 6/6, Mill 3/3, Sort 6/6) |
-| Anomalie LOF | Eventy ze zmianą stanu (semantycznie ważne) |
+### 6.1 Macierz przejść między klastrami
 
-### Najważniejsze obserwacje
+Dla najlepszej metody klasteryzacji (DBSCAN) obliczamy macierz przejść — ile razy event z klastra A jest bezpośrednio następowany przez event z klastra B (w porządku chronologicznym wewnątrz każdej aktywności).
 
-1. **Dane są wysokiej jakości** — brak błędów, anomalie to eventy graniczne lub przejścia faz
-2. **Aktywności są separowalne** w przestrzeni sygnałów (PCA, t-SNE, K-Means)
-3. **Storage dominuje** przestrzeń cech (47 eventów, 12 sygnałów, ruch 3D)
-4. **Burn i Mill są najbardziej podobne** (podobne profile sygnałowe)
-5. **Wzorce CEP są w pełni weryfikowalne** w danych — sygnatury są kompletne
-6. **Mill i Transport** mają dużo powtórzonych stanów (długie fazy stabilne)
-7. **Pickup-move-oven** ma najwyższą dynamikę zmian sygnałów (67% eventów ze zmianą)
+**Macierz przejść DBSCAN (eps=1.0, min_samples=2):**
 
-### Ograniczenia
+| | K0 | K1 | K2 | K3 | K4 |
+|---|---|---|---|---|---|
+| **K0** (Burn+Transport) | **28** | 0 | 0 | 0 | 0 |
+| **K1** (Mill) | 0 | **11** | 0 | 0 | 0 |
+| **K2** (Pickup-move-oven) | 0 | 0 | **17** | 0 | 0 |
+| **K3** (Sort) | 0 | 0 | 0 | **11** | 0 |
+| **K4** (Storage) | 0 | 0 | 0 | 0 | **46** |
 
-- **Jeden case per aktywność** — brak analizy wariantów między instancjami
-- **Dane z jednego dnia** — analiza sezonowości i wzorców dobowych niemożliwa
-- **Mały zbiór (119 eventów)** — wyniki klasteryzacji i anomalii należy interpretować ostrożnie
-- **Brak danych wielokrotnych przebiegów** — nie można ocenić powtarzalności procesu
+**Interpretacja:**
+- **Wszystkie przejścia są na diagonali** (113/113 = 100%) — eventy zawsze pozostają w tym samym klastrze co poprzedni event w tej samej aktywności
+- **Brak przejść między klastrami w obrębie jednej aktywności** — to potwierdza, że klastry odpowiadają całym aktywnościom, nie fazom wewnątrz aktywności
+- **Diagonala odzwierciedla rozmiar aktywności:** K4 (Storage) = 46 przejść (47 eventów - 1), K0 (Burn+Transport) = 28 (13+17 - 2 = 28), itd.
 
+**Wniosek dla Milestone 3:** Klastry sygnałowe odpowiadają aktywnościom (poziom high-level), nie fazom wewnątrz aktywności (poziom low-level). Aby uchwycić fazy wewnątrz aktywności, należałoby klastryzować osobno wewnątrz każdej aktywności (kontynuacja w M3 — analiza wzorców CEP).
+
+![Macierz przejść między klastrami](m2_transition_matrix.png)
+![Klastry vs Ground Truth na PCA 2D](m2_dbscan_vs_gt.png)
+
+---
+
+## 7. Podsumowanie
+
+### Pipeline analizy:
+1. Sygnały z czujników (119 eventów × 26 sygnałów)
+2. NaN → 0, normalizacja 512→1
+3. Analiza outlierów (brak krytycznych)
+4. PCA (opcjonalnie, 5 komponentów)
+5. Klasteryzacja: K-Means, DBSCAN, HDBSCAN (grid search parametrów)
+6. Porównanie z Ground Truth (aktywności): ARI, NMI, macierz konfuzji
+7. Wybór najlepszej metody → macierz przejść między klastrami
+
+### Ograniczenia:
+- Mały zbiór (119 eventów) — ogranicza skuteczność DBSCAN/HDBSCAN
+- Jeden case per aktywność — brak wariantów
+- Strukturalne NaN (uzupełnione 0) mogą faworyzować algorytmy wrażliwe na rzadkość danych
 
 Plik wykonawczy: `Milestone2_EDA.ipynb`
